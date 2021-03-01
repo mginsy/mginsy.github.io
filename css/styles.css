@@ -183,6 +183,12 @@ footer a, footer a:hover {
     text-decoration: none;
 }
 
+.profpic{
+    border-radius: 50%;
+
+}
+
+
 /* Responsiveness */
 @media only screen and (max-width: 600px) {
     h1,
