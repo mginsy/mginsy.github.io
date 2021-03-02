@@ -188,6 +188,12 @@ footer a, footer a:hover {
 
 }
 
+.col-4 {
+    display: grid;
+    align-items: center; /* remove one of these */
+    justify-content: center;
+  }
+
 
 /* Responsiveness */
 @media only screen and (max-width: 600px) {
