@@ -108,6 +108,23 @@ a:hover {
     background-color: var(--highlight-color);
 }
 
+.fab {
+    color: grey;
+    font-size: 60px;
+
+}
+
+.fa {
+    color: grey;
+    font-size: 60px;
+
+}
+
+.sociallist {
+    align-items: center; /* remove one of these */
+    justify-content: center;
+}
+
 /* * * * * * * * * * *
  *  Content Styles   *
  * * * * * * * * * * */
@@ -149,6 +166,16 @@ a:hover {
 
 #blurb {
     margin-bottom: 50px;
+}
+
+/* Links section */
+#links {
+    margin-bottom: 50px;
+}
+
+#links .row {
+    display: flex;
+    align-items: center;
 }
 
 /* Skills section */
