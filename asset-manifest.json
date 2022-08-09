@@ -1,6 +1,6 @@
 {
   "files": {
-    "main.css": "/static/css/main.f25819ba.css",
+    "main.css": "/static/css/main.e9be2a49.css",
     "main.js": "/static/js/main.efaac9d7.js",
     "static/media/RxMinder.pdf": "/static/media/RxMinder.1ab7aa11a97cc80e75b2.pdf",
     "static/media/nature.gif": "/static/media/nature.6791ffa843465238d04f.gif",
@@ -10,18 +10,18 @@
     "static/media/ResumeMaxGinsberg.pdf": "/static/media/ResumeMaxGinsberg.b98e7b053a4d993328e0.pdf",
     "static/media/Hiatus-MVJnw.otf": "/static/media/Hiatus-MVJnw.76d17c95d968aa108054.otf",
     "static/media/WordleBot.pdf": "/static/media/WordleBot.348149128df78da0594e.pdf",
-    "static/media/PatrickHand-Regular.ttf": "/static/media/PatrickHand-Regular.ec54a049bdef4be52511.ttf",
     "static/media/Apollo.PNG": "/static/media/Apollo.c7a3404554800748cf63.PNG",
     "static/media/MakersLogo.png": "/static/media/MakersLogo.c31c45fba0066aa75ca2.png",
     "static/media/Wordle.PNG": "/static/media/Wordle.eaf9b799557b0c7825c7.PNG",
     "static/media/AccLogo.png": "/static/media/AccLogo.f2317b0bae329e5d026d.png",
     "static/media/RxMinder.PNG": "/static/media/RxMinder.16acf08ee6ca8653d21f.PNG",
+    "static/media/FTP - Monreta.otf": "/static/media/FTP - Monreta.9ef999ca59015c1f0ded.otf",
     "index.html": "/index.html",
-    "main.f25819ba.css.map": "/static/css/main.f25819ba.css.map",
+    "main.e9be2a49.css.map": "/static/css/main.e9be2a49.css.map",
     "main.efaac9d7.js.map": "/static/js/main.efaac9d7.js.map"
   },
   "entrypoints": [
-    "static/css/main.f25819ba.css",
+    "static/css/main.e9be2a49.css",
     "static/js/main.efaac9d7.js"
   ]
 }
