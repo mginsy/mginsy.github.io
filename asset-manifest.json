@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/static/css/main.35425887.css",
-    "main.js": "/static/js/main.9953d18f.js",
+    "main.js": "/static/js/main.a75db47d.js",
     "static/media/RxMinder.pdf": "/static/media/RxMinder.1ab7aa11a97cc80e75b2.pdf",
     "static/media/nature.gif": "/static/media/nature.6791ffa843465238d04f.gif",
     "static/media/Compost.PNG": "/static/media/Compost.3bd7fdf2969448ffb277.PNG",
     "static/media/Showcase.PNG": "/static/media/Showcase.7947039c5933078d76d1.PNG",
     "static/media/LAFoodList.PNG": "/static/media/LAFoodList.c14828277cf208e60454.PNG",
-    "static/media/ResumeMaxGinsberg.pdf": "/static/media/ResumeMaxGinsberg.a951c2048806bcbe373b.pdf",
+    "static/media/ResumeMaxGinsberg.pdf": "/static/media/ResumeMaxGinsberg.096819d577f03efcaf24.pdf",
     "static/media/Hiatus-MVJnw.otf": "/static/media/Hiatus-MVJnw.76d17c95d968aa108054.otf",
     "static/media/WordleBot.pdf": "/static/media/WordleBot.348149128df78da0594e.pdf",
     "static/media/Apollo.PNG": "/static/media/Apollo.c7a3404554800748cf63.PNG",
@@ -18,10 +18,10 @@
     "static/media/FTP - Monreta.otf": "/static/media/FTP - Monreta.9ef999ca59015c1f0ded.otf",
     "index.html": "/index.html",
     "main.35425887.css.map": "/static/css/main.35425887.css.map",
-    "main.9953d18f.js.map": "/static/js/main.9953d18f.js.map"
+    "main.a75db47d.js.map": "/static/js/main.a75db47d.js.map"
   },
   "entrypoints": [
     "static/css/main.35425887.css",
-    "static/js/main.9953d18f.js"
+    "static/js/main.a75db47d.js"
   ]
 }
