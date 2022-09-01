@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "/static/css/main.35425887.css",
-    "main.js": "/static/js/main.a75db47d.js",
+    "main.js": "/static/js/main.077e44ce.js",
     "static/media/RxMinder.pdf": "/static/media/RxMinder.1ab7aa11a97cc80e75b2.pdf",
     "static/media/nature.gif": "/static/media/nature.6791ffa843465238d04f.gif",
     "static/media/Compost.PNG": "/static/media/Compost.3bd7fdf2969448ffb277.PNG",
@@ -18,10 +18,10 @@
     "static/media/FTP - Monreta.otf": "/static/media/FTP - Monreta.9ef999ca59015c1f0ded.otf",
     "index.html": "/index.html",
     "main.35425887.css.map": "/static/css/main.35425887.css.map",
-    "main.a75db47d.js.map": "/static/js/main.a75db47d.js.map"
+    "main.077e44ce.js.map": "/static/js/main.077e44ce.js.map"
   },
   "entrypoints": [
     "static/css/main.35425887.css",
-    "static/js/main.a75db47d.js"
+    "static/js/main.077e44ce.js"
   ]
 }
