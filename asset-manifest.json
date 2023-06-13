@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "/static/css/main.4f75a797.css",
-    "main.js": "/static/js/main.ddf152ad.js",
+    "main.css": "/static/css/main.2bdd6cf5.css",
+    "main.js": "/static/js/main.d2ddc1e7.js",
     "static/media/RxMinder.pdf": "/static/media/RxMinder.1ab7aa11a97cc80e75b2.pdf",
     "static/media/nature.gif": "/static/media/nature.6791ffa843465238d04f.gif",
     "static/media/Compost.PNG": "/static/media/Compost.3bd7fdf2969448ffb277.PNG",
@@ -17,11 +17,11 @@
     "static/media/RxMinder.PNG": "/static/media/RxMinder.16acf08ee6ca8653d21f.PNG",
     "static/media/FTP - Monreta.otf": "/static/media/FTP - Monreta.9ef999ca59015c1f0ded.otf",
     "index.html": "/index.html",
-    "main.4f75a797.css.map": "/static/css/main.4f75a797.css.map",
-    "main.ddf152ad.js.map": "/static/js/main.ddf152ad.js.map"
+    "main.2bdd6cf5.css.map": "/static/css/main.2bdd6cf5.css.map",
+    "main.d2ddc1e7.js.map": "/static/js/main.d2ddc1e7.js.map"
   },
   "entrypoints": [
-    "static/css/main.4f75a797.css",
-    "static/js/main.ddf152ad.js"
+    "static/css/main.2bdd6cf5.css",
+    "static/js/main.d2ddc1e7.js"
   ]
 }
