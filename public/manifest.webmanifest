@@ -1,0 +1,10 @@
+{
+  "name": "We Got the Runs — Lineup Generator",
+  "short_name": "WGTR Lineup",
+  "description": "Fair, no-fuss softball rotations.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e9eee9",
+  "theme_color": "#123b32",
+  "icons": [{ "src": "/softball.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
