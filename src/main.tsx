@@ -318,6 +318,19 @@ async function clearGameSheet(): Promise<void> {
 
 const TEN_PLAYER_POSITIONS: Position[] = [...ALL_POSITIONS];
 const NINE_PLAYER_POSITIONS: Position[] = ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
+const FLEX_POSITIONS: Record<Position, readonly RosterPosition[]> = {
+  P: ['LCF', 'RCF', 'SS'],
+  C: ['2B', 'LF', 'RF'],
+  '1B': ['2B', 'SS'],
+  '2B': ['SS', '1B'],
+  '3B': ['SS', '2B'],
+  SS: ['3B', '2B'],
+  LF: ['LCF', 'RCF'],
+  LCF: ['LF', 'RCF'],
+  CF: ['LF', 'RF'],
+  RCF: ['LCF', 'RF'],
+  RF: ['RCF', 'LCF']
+};
 
 function canPlay(player: Player, position: Position): boolean {
   return position === 'CF'
@@ -325,8 +338,16 @@ function canPlay(player: Player, position: Position): boolean {
     : player.positions.includes(position);
 }
 
+function positionComfort(player: Player, position: Position): number {
+  if (canPlay(player, position)) return 0;
+  return FLEX_POSITIONS[position].some(nearby => player.positions.includes(nearby)) ? 1 : Number.POSITIVE_INFINITY;
+}
+
 function preferenceRank(player: Player, position: Position): number {
-  if (position !== 'CF') return player.positions.indexOf(position);
+  if (position !== 'CF') {
+    const rank = player.positions.indexOf(position);
+    return rank >= 0 ? rank : player.positions.length;
+  }
   const centerRanks = ['LCF', 'RCF'].map(pos => player.positions.indexOf(pos as RosterPosition)).filter(rank => rank >= 0);
   return centerRanks.length ? Math.min(...centerRanks) : player.positions.length;
 }
@@ -387,7 +408,7 @@ function generateLineup(players: Player[], preservedPlan: InningPlan[] = []): In
       return ac - bc;
     });
 
-    function search(index: number): boolean {
+    function search(index: number, allowFlex: boolean): boolean {
       if (index === orderedPositions.length) {
         const field = Object.values(assigned);
         const women = field.filter(id => eligible.find(p => p.id === id)?.gender === 'Woman').length;
@@ -395,17 +416,23 @@ function generateLineup(players: Player[], preservedPlan: InningPlan[] = []): In
       }
       const pos = orderedPositions[index];
       const candidates = eligible
-        .filter(p => !used.has(p.id) && canPlay(p, pos))
-        .sort((a, b) => scoreCandidate(a, pos, counts, lastAssignment, jitter) - scoreCandidate(b, pos, counts, lastAssignment, jitter));
+        .filter(p => !used.has(p.id) && (allowFlex ? Number.isFinite(positionComfort(p, pos)) : canPlay(p, pos)))
+        .sort((a, b) => {
+          const fairness = (counts[a.id] || 0) - (counts[b.id] || 0);
+          if (fairness) return fairness;
+          const comfort = positionComfort(a, pos) - positionComfort(b, pos);
+          if (comfort) return comfort;
+          return scoreCandidate(a, pos, counts, lastAssignment, jitter) - scoreCandidate(b, pos, counts, lastAssignment, jitter);
+        });
       for (const player of candidates) {
         assigned[pos] = player.id; used.add(player.id);
-        if (search(index + 1)) return true;
+        if (search(index + 1, allowFlex)) return true;
         used.delete(player.id); delete assigned[pos];
       }
       return false;
     }
 
-    if (!search(0)) throw new Error(`No legal lineup fits inning ${inning}. Add position flexibility or adjust attendance.`);
+    if (!search(0, false) && !search(0, true)) throw new Error(`No legal lineup fits inning ${inning}. Add position flexibility or adjust attendance.`);
     Object.values(assigned).forEach(id => counts[id]++);
     eligible.forEach(p => { lastAssignment[p.id] = used.has(p.id) ? (Object.keys(assigned).find(pos => assigned[pos] === p.id) ?? 'BENCH') : 'BENCH'; });
     const bench = eligible.filter(p => !used.has(p.id)).map(p => p.id);
