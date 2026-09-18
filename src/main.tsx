@@ -12,7 +12,7 @@ type Player = { id: string; name: string; gender: Gender; positions: RosterPosit
 type InningPlan = { inning: number; assignments: Record<string, string>; bench: string[] };
 type SheetsConfig = { spreadsheet: string; gid: string };
 type AppTab = 'game' | 'roster';
-type Change = { id: string; action: 'IN' | 'OUT'; pos?: string };
+type Change = { id: string; action: 'IN' | 'OUT' | 'MOVE'; pos?: string; fromPos?: string };
 type StoredGame = { version: 1; plan: InningPlan[]; battingOrder: string[]; inning: number; updatedAt: string };
 
 const GAME_RULES = Object.freeze({ innings: 7, fielders: 10, minWomen: 4 });
@@ -369,6 +369,18 @@ function scoreCandidate(player: Player, position: Position, counts: Record<strin
   return score;
 }
 
+function buildChanges(previous: InningPlan | undefined, current: InningPlan | undefined): Change[] {
+  if (!previous || !current) return [];
+  const previousPositions = Object.fromEntries(Object.entries(previous.assignments).map(([position, id]) => [id, position]));
+  const currentPositions = Object.fromEntries(Object.entries(current.assignments).map(([position, id]) => [id, position]));
+  const outs = Object.keys(previousPositions).filter(id => !currentPositions[id]).map(id => ({ id, action: 'OUT' as const }));
+  const ins = Object.keys(currentPositions).filter(id => !previousPositions[id]).map(id => ({ id, action: 'IN' as const, pos: currentPositions[id] }));
+  const moves = Object.keys(currentPositions)
+    .filter(id => previousPositions[id] && previousPositions[id] !== currentPositions[id])
+    .map(id => ({ id, action: 'MOVE' as const, fromPos: previousPositions[id], pos: currentPositions[id] }));
+  return [...outs, ...ins, ...moves];
+}
+
 function generateLineup(players: Player[], preservedPlan: InningPlan[] = []): InningPlan[] {
   const available = players.filter(p => p.available);
   const counts = Object.fromEntries(available.map(p => [p.id, 0]));
@@ -420,6 +432,8 @@ function generateLineup(players: Player[], preservedPlan: InningPlan[] = []): In
         .sort((a, b) => {
           const fairness = (counts[a.id] || 0) - (counts[b.id] || 0);
           if (fairness) return fairness;
+          const benchRecovery = Number(lastAssignment[b.id] === 'BENCH') - Number(lastAssignment[a.id] === 'BENCH');
+          if (benchRecovery) return benchRecovery;
           const comfort = positionComfort(a, pos) - positionComfort(b, pos);
           if (comfort) return comfort;
           return scoreCandidate(a, pos, counts, lastAssignment, jitter) - scoreCandidate(b, pos, counts, lastAssignment, jitter);
@@ -444,23 +458,45 @@ function generateLineup(players: Player[], preservedPlan: InningPlan[] = []): In
 function generateBattingOrder(players: Player[]): string[] {
   const available = players.filter(player => player.available);
   const rank = (player: Player) => player.battingStrength * 10 + Math.random() * 18;
-  const women = available.filter(player => player.gender === 'Woman').map(player => ({ player, score: rank(player) })).sort((a, b) => b.score - a.score);
-  const men = available.filter(player => player.gender === 'Man').map(player => ({ player, score: rank(player) })).sort((a, b) => b.score - a.score);
-  const other = available.filter(player => player.gender === 'Other').map(player => ({ player, score: rank(player) })).sort((a, b) => b.score - a.score);
-  let next: 'Woman' | 'Man' = women.length > men.length || (women.length === men.length && (women[0]?.score || 0) > (men[0]?.score || 0)) ? 'Woman' : 'Man';
-  const order: string[] = [];
-  while (women.length || men.length) {
-    const preferred = next === 'Woman' ? women : men;
-    const alternate = next === 'Woman' ? men : women;
-    const pick = (preferred.length ? preferred : alternate).shift();
-    if (pick) order.push(pick.player.id);
-    next = next === 'Woman' ? 'Man' : 'Woman';
+  const genders: Gender[] = ['Woman', 'Man', 'Other'];
+  const groups = Object.fromEntries(genders.map(gender => [gender, available.filter(player => player.gender === gender).map(player => ({ player, score: rank(player) })).sort((a, b) => b.score - a.score)])) as Record<Gender, Array<{ player: Player; score: number }>>;
+  const initialCounts = Object.fromEntries(genders.map(gender => [gender, groups[gender].length])) as Record<Gender, number>;
+  const memo = new Map<string, { penalty: number; sequence: Gender[] }>();
+
+  function arrange(remaining: Record<Gender, number>, first: Gender[], last: Gender[]): { penalty: number; sequence: Gender[] } {
+    const remainingTotal = genders.reduce((total, gender) => total + remaining[gender], 0);
+    if (!remainingTotal) {
+      const boundary = [...last.slice(-2), ...first.slice(0, 2)];
+      let penalty = 0;
+      for (let index = 0; index + 2 < boundary.length; index++) {
+        if (boundary[index] === boundary[index + 1] && boundary[index] === boundary[index + 2]) penalty++;
+      }
+      return { penalty, sequence: [] };
+    }
+    const key = `${genders.map(gender => remaining[gender]).join(',')}|${first.join(',')}|${last.join(',')}`;
+    const cached = memo.get(key);
+    if (cached) return cached;
+    const choices = genders.filter(gender => remaining[gender] > 0).sort((a, b) => {
+      const aIndex = initialCounts[a] - remaining[a];
+      const bIndex = initialCounts[b] - remaining[b];
+      return (groups[b][bIndex]?.score || 0) - (groups[a][aIndex]?.score || 0);
+    });
+    let best: { penalty: number; sequence: Gender[] } | null = null;
+    for (const gender of choices) {
+      const nextRemaining = { ...remaining, [gender]: remaining[gender] - 1 };
+      const localPenalty = last.length >= 2 && last[last.length - 1] === gender && last[last.length - 2] === gender ? 1 : 0;
+      const result = arrange(nextRemaining, first.length < 2 ? [...first, gender] : first, [...last.slice(-1), gender]);
+      const candidate = { penalty: localPenalty + result.penalty, sequence: [gender, ...result.sequence] };
+      if (!best || candidate.penalty < best.penalty) best = candidate;
+    }
+    const resolved = best ?? { penalty: 0, sequence: [] };
+    memo.set(key, resolved);
+    return resolved;
   }
-  for (const entry of other) {
-    const insertion = order.findIndex((id, index) => index > 0 && players.find(player => player.id === id)?.gender === players.find(player => player.id === order[index - 1])?.gender);
-    order.splice(insertion < 0 ? order.length : insertion, 0, entry.player.id);
-  }
-  return order;
+
+  const genderSequence = arrange(initialCounts, [], []).sequence;
+  const used = Object.fromEntries(genders.map(gender => [gender, 0])) as Record<Gender, number>;
+  return genderSequence.map(gender => groups[gender][used[gender]++].player.id);
 }
 
 function App() {
@@ -505,16 +541,24 @@ function App() {
     void refreshPublicData(true);
   }, []);
   useEffect(() => { void loadGoogleIdentity(); }, []);
+  useEffect(() => {
+    if (!editing && !showAccountMenu) return;
+    const bodyOverflow = document.body.style.overflow;
+    const rootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = rootOverflow;
+    };
+  }, [editing, showAccountMenu]);
 
   const current = plan[inning];
   const byId = useMemo<Record<string, Player>>(() => Object.fromEntries(players.map(p => [p.id, p])), [players]);
   const badgeLabels = useMemo(() => buildBadgeLabels(players), [players]);
   const hasPlayerChanges = Boolean(editing && editingOriginal && !playersMatch(editing, editingOriginal));
   const previous = plan[inning - 1];
-  const changes: Change[] = current && previous ? [
-    ...Object.values(previous.assignments).filter(id => !Object.values(current.assignments).includes(id)).map(id => ({ id, action: 'OUT' as const })),
-    ...Object.values(current.assignments).filter(id => !Object.values(previous.assignments).includes(id)).map(id => ({ id, action: 'IN' as const, pos: Object.keys(current.assignments).find(p => current.assignments[p] === id) }))
-  ] : [];
+  const changes = buildChanges(previous, current);
 
   async function regenerate(): Promise<void> {
     if (!isAuthorized) return;
@@ -872,7 +916,7 @@ function App() {
               </div>
               <aside className="side-stack">
                 <div className="bench-card"><div className="card-label"><span>Bench</span><b>{current.bench.length} players</b></div>{current.bench.length ? current.bench.map(id => <button type="button" className={`bench-player ${selectedFieldPlayer === id ? 'selected-player' : ''}`} disabled={!isAuthorized || isSavingManualField} aria-pressed={selectedFieldPlayer === id} onClick={() => void selectFieldPlayer(id)} key={id}><span className={`avatar prefix-${Math.min(badgeLabels[id]?.length || 1, 4)} ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[id]}</span></span><strong>{byId[id]?.name}</strong></button>) : <p className="empty">Everyone is fielding.</p>}</div>
-                <div className="change-card"><p className="eyebrow">At the change</p><h2>{inning === 0 ? 'Start here' : `For inning ${inning + 1}`}</h2>{inning === 0 ? <p className="muted">Take the field with the positions shown. The next card will list every swap.</p> : changes.length ? changes.map((c, i) => <div className={`change ${c.action.toLowerCase()}`} key={`${c.id}-${i}`}><b>{c.action}</b><span><strong>{byId[c.id]?.name}</strong>{c.pos && ` → ${c.pos}`}</span></div>) : <p className="muted">No bench changes this inning.</p>}</div>
+                <div className="change-card"><p className="eyebrow">At the change</p><h2>{inning === 0 ? 'Start here' : `For inning ${inning + 1}`}</h2>{inning === 0 ? <p className="muted">Take the field with the positions shown. The next card will list every swap.</p> : changes.length ? changes.map((c, i) => <div className={`change ${c.action.toLowerCase()}`} key={`${c.id}-${i}`}><b>{c.action}</b><span><strong>{byId[c.id]?.name}</strong>{c.action === 'MOVE' ? ` · ${c.fromPos} → ${c.pos}` : c.pos && ` → ${c.pos}`}</span></div>) : <p className="muted">No lineup changes this inning.</p>}</div>
               </aside>
             </div>
             <div className="next-bar"><button disabled={inning === 0} onClick={() => void selectInning(inning - 1)}>← Previous</button><span><i /> Gender rule met</span><button className="next" disabled={inning === plan.length - 1} onClick={() => void selectInning(inning + 1)}>Next inning →</button></div>
