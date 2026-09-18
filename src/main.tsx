@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import googleIcon from './google.png';
 import loaderGif from './loader.gif';
@@ -8,7 +8,7 @@ const ALL_POSITIONS = ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'LCF', 'RCF', 'RF
 type RosterPosition = typeof ALL_POSITIONS[number];
 type Position = RosterPosition | 'CF';
 type Gender = 'Woman' | 'Man' | 'Other';
-type Player = { id: string; name: string; gender: Gender; positions: RosterPosition[]; battingStrength: number; fieldingStrength: number; available: boolean; lateArrivalInning?: number; earlyDepartureInning?: number; sheetRow?: number };
+type Player = { id: string; name: string; gender: Gender; positions: RosterPosition[]; primaryPosition?: RosterPosition; battingStrength: number; fieldingStrength: number; available: boolean; lateArrivalInning?: number; earlyDepartureInning?: number; sheetRow?: number };
 type InningPlan = { inning: number; assignments: Record<string, string>; bench: string[] };
 type SheetsConfig = { spreadsheet: string; gid: string };
 type AppTab = 'game' | 'roster';
@@ -35,7 +35,7 @@ const PLAYER_SEEDS: Array<[string, Gender, RosterPosition[], number, number]> = 
   ['Riley', 'Woman', ['C', 'RF'], 5, 6], ['Jordan', 'Man', ['3B', 'LF'], 7, 7], ['Casey', 'Woman', ['LCF', 'RCF'], 6, 7],
   ['Drew', 'Man', ['P', '1B'], 8, 8], ['Avery', 'Woman', ['LF', 'RF'], 5, 5], ['Quinn', 'Man', ['RCF', 'RF'], 6, 6]
 ];
-const DEFAULT_PLAYERS: Player[] = PLAYER_SEEDS.map((p, i) => ({ id: `p${i}`, name: p[0], gender: p[1], positions: p[2], battingStrength: p[3], fieldingStrength: p[4], available: true }));
+const DEFAULT_PLAYERS: Player[] = PLAYER_SEEDS.map((p, i) => ({ id: `p${i}`, name: p[0], gender: p[1], positions: p[2], primaryPosition: p[2][0], battingStrength: p[3], fieldingStrength: p[4], available: true }));
 
 const DEFAULT_SHEET = 'https://docs.google.com/spreadsheets/d/1LLm4LPiC9C5_SInYt5pqw7YPfDD8cKLYDvMWpUyOZ4A/edit?gid=0#gid=0';
 const SHEET_CONFIG: SheetsConfig = Object.freeze({ spreadsheet: DEFAULT_SHEET, gid: '0' });
@@ -56,14 +56,20 @@ function spreadsheetIdFrom(value: string): string {
 }
 
 function normalizePlayers(value: Player[]): Player[] {
-  return value.map(player => ({
-    ...player,
-    battingStrength: Number(player.battingStrength) || 5,
-    fieldingStrength: Number(player.fieldingStrength) || 5,
-    positions: (player.positions as string[]).map(position => position === 'LC' ? 'LCF' : position === 'RC' ? 'RCF' : position) as RosterPosition[],
-    lateArrivalInning: normalizeInning(player.lateArrivalInning),
-    earlyDepartureInning: normalizeInning(player.earlyDepartureInning)
-  }));
+  return value.map(player => {
+    const positions = (player.positions as string[]).map(position => position === 'LC' ? 'LCF' : position === 'RC' ? 'RCF' : position) as RosterPosition[];
+    const primaryValue = String(player.primaryPosition ?? '');
+    const rawPrimary = (primaryValue === 'LC' ? 'LCF' : primaryValue === 'RC' ? 'RCF' : primaryValue) as RosterPosition;
+    return {
+      ...player,
+      battingStrength: Number(player.battingStrength) || 5,
+      fieldingStrength: Number(player.fieldingStrength) || 5,
+      positions,
+      primaryPosition: rawPrimary && positions.includes(rawPrimary) ? rawPrimary : positions[0],
+      lateArrivalInning: normalizeInning(player.lateArrivalInning),
+      earlyDepartureInning: normalizeInning(player.earlyDepartureInning)
+    };
+  });
 }
 
 function normalizeInning(value: unknown): number | undefined {
@@ -87,6 +93,7 @@ function playersMatch(left: Player, right: Player): boolean {
     && left.name === right.name
     && left.gender === right.gender
     && left.positions.join('|') === right.positions.join('|')
+    && left.primaryPosition === right.primaryPosition
     && left.available === right.available
     && left.lateArrivalInning === right.lateArrivalInning
     && left.earlyDepartureInning === right.earlyDepartureInning;
@@ -236,6 +243,7 @@ async function savePlayerToSheet(player: Player): Promise<void> {
   const values = [[
     player.name,
     ...ALL_POSITIONS.map(position => player.positions.includes(position) ? 'Yes' : 'No'),
+    player.primaryPosition ?? '',
     player.battingStrength,
     player.fieldingStrength,
     player.gender === 'Woman' ? 'Female' : player.gender === 'Man' ? 'Male' : 'Other',
@@ -243,7 +251,7 @@ async function savePlayerToSheet(player: Player): Promise<void> {
     player.lateArrivalInning ?? '',
     player.earlyDepartureInning ?? ''
   ]];
-  const range = player.sheetRow ? `'${title}'!A${player.sheetRow}:Q${player.sheetRow}` : `'${title}'!A:Q`;
+  const range = player.sheetRow ? `'${title}'!A${player.sheetRow}:R${player.sheetRow}` : `'${title}'!A:R`;
   const endpoint = player.sheetRow
     ? `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`
     : `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
@@ -260,7 +268,7 @@ async function saveAttendanceToSheet(player: Player, available: boolean): Promis
   const token = await requestSheetsToken();
   const spreadsheetId = spreadsheetIdFrom(SHEET_CONFIG.spreadsheet);
   const { roster: title } = await getSheetTitles(token);
-  const range = `'${title}'!O${player.sheetRow}`;
+  const range = `'${title}'!P${player.sheetRow}`;
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -323,6 +331,12 @@ function preferenceRank(player: Player, position: Position): number {
   return centerRanks.length ? Math.min(...centerRanks) : player.positions.length;
 }
 
+function isPrimaryPosition(player: Player, position: Position): boolean {
+  return position === 'CF'
+    ? player.primaryPosition === 'LCF' || player.primaryPosition === 'RCF'
+    : player.primaryPosition === position;
+}
+
 function scoreCandidate(player: Player, position: Position, counts: Record<string, number>, lastAssignment: Record<string, string>, jitter: Record<string, number>): number {
   const played = counts[player.id] || 0;
   let score = played * 100;
@@ -362,7 +376,11 @@ function generateLineup(players: Player[], preservedPlan: InningPlan[] = []): In
     if (eligibleWomen < GAME_RULES.minWomen) throw new Error(`Inning ${inning} needs 4 eligible women, but only ${eligibleWomen} are available.`);
     const assigned: Record<string, string> = {};
     const used = new Set<string>();
-    const jitter = Object.fromEntries(eligible.flatMap(player => positions.map(position => [`${player.id}:${position}`, Math.random() * 16])));
+    const jitter = Object.fromEntries(eligible.flatMap(player => positions.map(position => {
+      const positionWeight = isPrimaryPosition(player, position) ? 3 : 1;
+      const weightedRandom = -Math.log(Math.max(Math.random(), Number.EPSILON)) * 8 / positionWeight;
+      return [`${player.id}:${position}`, weightedRandom];
+    })));
     const orderedPositions = [...positions].sort((a, b) => {
       const ac = eligible.filter(p => canPlay(p, a)).length;
       const bc = eligible.filter(p => canPlay(p, b)).length;
@@ -439,8 +457,14 @@ function App() {
   const [editing, setEditing] = useState<Player | null>(null);
   const [editingOriginal, setEditingOriginal] = useState<Player | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [selectedFieldPlayer, setSelectedFieldPlayer] = useState<string | null>(null);
+  const [isSavingManualField, setIsSavingManualField] = useState(false);
+  const [draggingBatter, setDraggingBatter] = useState<string | null>(null);
+  const battingDragRef = useRef<{ id: string; original: string[] } | null>(null);
+  const battingOrderRef = useRef<string[]>(battingOrder);
 
   useEffect(() => localStorage.setItem('dugout.players', JSON.stringify(players)), [players]);
+  useEffect(() => { battingOrderRef.current = battingOrder; }, [battingOrder]);
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     if (import.meta.env.PROD) {
@@ -498,6 +522,103 @@ function App() {
     }
   }
 
+  async function selectFieldPlayer(playerId: string): Promise<void> {
+    if (!isAuthorized || isSavingManualField || !current) return;
+    if (!selectedFieldPlayer) {
+      setSelectedFieldPlayer(playerId);
+      return;
+    }
+    if (selectedFieldPlayer === playerId) {
+      setSelectedFieldPlayer(null);
+      return;
+    }
+
+    const assignments = { ...current.assignments };
+    const bench = [...current.bench];
+    const firstPosition = Object.keys(assignments).find(position => assignments[position] === selectedFieldPlayer);
+    const secondPosition = Object.keys(assignments).find(position => assignments[position] === playerId);
+    const firstBenchIndex = bench.indexOf(selectedFieldPlayer);
+    const secondBenchIndex = bench.indexOf(playerId);
+
+    if (firstPosition && secondPosition) {
+      assignments[firstPosition] = playerId;
+      assignments[secondPosition] = selectedFieldPlayer;
+    } else if (firstPosition && secondBenchIndex >= 0) {
+      assignments[firstPosition] = playerId;
+      bench[secondBenchIndex] = selectedFieldPlayer;
+    } else if (firstBenchIndex >= 0 && secondPosition) {
+      assignments[secondPosition] = selectedFieldPlayer;
+      bench[firstBenchIndex] = playerId;
+    } else if (firstBenchIndex >= 0 && secondBenchIndex >= 0) {
+      [bench[firstBenchIndex], bench[secondBenchIndex]] = [bench[secondBenchIndex], bench[firstBenchIndex]];
+    } else {
+      setSelectedFieldPlayer(null);
+      return;
+    }
+
+    const previousPlan = plan;
+    const nextPlan = plan.map((item, index) => index === inning ? { ...item, assignments, bench } : item);
+    setSelectedFieldPlayer(null);
+    setIsSavingManualField(true);
+    setPlan(nextPlan);
+    try {
+      await persistGameToSheet(nextPlan, battingOrder, inning);
+    } catch (error) {
+      setPlan(previousPlan);
+      setNotice(error instanceof Error ? error.message : 'Could not save the fielding swap.');
+    } finally {
+      setIsSavingManualField(false);
+    }
+  }
+
+  function beginBattingDrag(event: React.PointerEvent<HTMLButtonElement>, playerId: string): void {
+    if (!isAuthorized) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    battingDragRef.current = { id: playerId, original: [...battingOrderRef.current] };
+    setDraggingBatter(playerId);
+  }
+
+  function moveBattingDrag(event: React.PointerEvent<HTMLButtonElement>): void {
+    const drag = battingDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-batter-id]') as HTMLElement | null;
+    const targetId = target?.dataset.batterId;
+    if (!targetId || targetId === drag.id) return;
+    const currentOrder = battingOrderRef.current;
+    const from = currentOrder.indexOf(drag.id);
+    const to = currentOrder.indexOf(targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    const nextOrder = [...currentOrder];
+    nextOrder.splice(from, 1);
+    nextOrder.splice(to, 0, drag.id);
+    battingOrderRef.current = nextOrder;
+    setBattingOrder(nextOrder);
+  }
+
+  async function finishBattingDrag(event: React.PointerEvent<HTMLButtonElement>, cancelled = false): Promise<void> {
+    const drag = battingDragRef.current;
+    if (!drag) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    battingDragRef.current = null;
+    setDraggingBatter(null);
+    if (cancelled) {
+      battingOrderRef.current = drag.original;
+      setBattingOrder(drag.original);
+      return;
+    }
+    const nextOrder = battingOrderRef.current;
+    if (nextOrder.join('|') === drag.original.join('|')) return;
+    try {
+      await persistGameToSheet(plan, nextOrder, inning);
+    } catch (error) {
+      battingOrderRef.current = drag.original;
+      setBattingOrder(drag.original);
+      setNotice(error instanceof Error ? error.message : 'Could not save the batting order.');
+    }
+  }
+
   async function restoreGame(): Promise<void> {
     try {
       const stored = await readGameFromSheet();
@@ -508,6 +629,7 @@ function App() {
   }
 
   function applyStoredGame(stored: StoredGame | null): void {
+    setSelectedFieldPlayer(null);
     if (!stored) {
       setPlan([]);
       setBattingOrder([]);
@@ -542,6 +664,7 @@ function App() {
   }
 
   async function selectInning(nextInning: number): Promise<void> {
+    setSelectedFieldPlayer(null);
     setInning(nextInning);
     if (!isAuthorized) return;
     try {
@@ -615,6 +738,9 @@ function App() {
     cachedSheetTitles = null;
     try { sessionStorage.removeItem(SESSION_TOKEN_KEY); } catch { /* The in-memory session is still cleared. */ }
     setIsAuthorized(false);
+    setSelectedFieldPlayer(null);
+    battingDragRef.current = null;
+    setDraggingBatter(null);
     closePlayerEditor();
     setShowAccountMenu(false);
     if (token && window.google?.accounts?.oauth2?.revoke) window.google.accounts.oauth2.revoke(token, () => undefined);
@@ -650,18 +776,24 @@ function App() {
       const value = (row: string[], name: string) => row[column(name)] ?? '';
       if (column('name') < 0) throw new Error('The sheet needs a Name header column.');
       const hasHereColumn = column('here') >= 0;
-      const imported: Player[] = table.slice(1).map((row, rowIndex) => ({ row, sheetRow: rowIndex + 2 })).filter(({ row }) => value(row, 'name').trim()).map(({ row, sheetRow }) => ({
-        id: `sheet-${value(row, 'name').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-        name: value(row, 'name').trim(),
-        gender: (value(row, 'gender').toLowerCase() === 'female' ? 'Woman' : value(row, 'gender').toLowerCase() === 'male' ? 'Man' : 'Other') as Gender,
-        positions: Object.entries(POSITION_COLUMNS).filter(([header]) => value(row, header).toLowerCase() === 'yes').map(([, position]) => position),
-        battingStrength: Math.max(1, Math.min(10, Number(value(row, 'batting strength')) || 5)),
-        fieldingStrength: Math.max(1, Math.min(10, Number(value(row, 'fielding strength')) || 5)),
-        available: !hasHereColumn || ['true', 'yes', 'y', '1', 'x'].includes(value(row, 'here').trim().toLowerCase()),
-        lateArrivalInning: normalizeInning(value(row, 'late')),
-        earlyDepartureInning: normalizeInning(value(row, 'early')),
-        sheetRow
-      }));
+      const imported: Player[] = table.slice(1).map((row, rowIndex) => ({ row, sheetRow: rowIndex + 2 })).filter(({ row }) => value(row, 'name').trim()).map(({ row, sheetRow }) => {
+        const positions = Object.entries(POSITION_COLUMNS).filter(([header]) => value(row, header).toLowerCase() === 'yes').map(([, position]) => position);
+        const requestedPrimary = value(row, 'primary position').trim().toUpperCase() || value(row, 'primary').trim().toUpperCase();
+        const primaryPosition = (requestedPrimary === 'LC' ? 'LCF' : requestedPrimary === 'RC' ? 'RCF' : requestedPrimary) as RosterPosition;
+        return {
+          id: `sheet-${value(row, 'name').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          name: value(row, 'name').trim(),
+          gender: (value(row, 'gender').toLowerCase() === 'female' ? 'Woman' : value(row, 'gender').toLowerCase() === 'male' ? 'Man' : 'Other') as Gender,
+          positions,
+          primaryPosition: positions.includes(primaryPosition) ? primaryPosition : undefined,
+          battingStrength: Math.max(1, Math.min(10, Number(value(row, 'batting strength')) || 5)),
+          fieldingStrength: Math.max(1, Math.min(10, Number(value(row, 'fielding strength')) || 5)),
+          available: !hasHereColumn || ['true', 'yes', 'y', '1', 'x'].includes(value(row, 'here').trim().toLowerCase()),
+          lateArrivalInning: normalizeInning(value(row, 'late')),
+          earlyDepartureInning: normalizeInning(value(row, 'early')),
+          sheetRow
+        };
+      });
       setPlayers(imported);
       if (!silent) setNotice(`Loaded ${imported.length} players from Google Sheets.`);
     } catch (error) {
@@ -693,12 +825,12 @@ function App() {
         </div>
 
         {plan.length ? <>
-          <div className="game-view-switch" role="tablist" aria-label="Lineup view"><button role="tab" aria-selected={gameView === 'field'} className={gameView === 'field' ? 'active' : ''} onClick={() => setGameView('field')}>Field</button><button role="tab" aria-selected={gameView === 'batting'} className={gameView === 'batting' ? 'active' : ''} onClick={() => setGameView('batting')}>Batting order</button></div>
+          <div className="game-view-switch" role="tablist" aria-label="Lineup view"><button role="tab" aria-selected={gameView === 'field'} className={gameView === 'field' ? 'active' : ''} onClick={() => setGameView('field')}>Field</button><button role="tab" aria-selected={gameView === 'batting'} className={gameView === 'batting' ? 'active' : ''} onClick={() => { setSelectedFieldPlayer(null); setGameView('batting'); }}>Batting order</button></div>
           {gameView === 'field' ? <>
             <div className="inning-strip" aria-label="Choose inning">{plan.map((item, i) => <button key={item.inning} onClick={() => void selectInning(i)} className={i === inning ? 'current' : i < inning ? 'past' : ''}><span>{item.inning}</span><small>{i < inning ? 'Played' : i === inning ? 'Now' : 'Next'}</small></button>)}</div>
             <div className="game-grid">
               <div className="field-card">
-                <div className="card-label"><span>Fielding lineup</span></div>
+                <div className="card-label"><span>Fielding lineup</span><b>{isAuthorized ? (selectedFieldPlayer ? 'Tap another player' : 'Tap to swap') : 'Connect Google to swap'}</b></div>
                 <div className="diamond">
                   <div className="foul-line foul-line-left" aria-hidden="true" />
                   <div className="foul-line foul-line-right" aria-hidden="true" />
@@ -708,18 +840,18 @@ function App() {
                   <i className="base base-first" aria-hidden="true" />
                   <i className="base base-second" aria-hidden="true" />
                   <i className="base base-third" aria-hidden="true" />
-                  {Object.entries(current.assignments).sort(([left], [right]) => FIELD_ANIMATION_ORDER.indexOf(left as Position) - FIELD_ANIMATION_ORDER.indexOf(right as Position)).map(([pos, id], index) => <div className={`position pos-${pos.toLowerCase()}`} key={`${inning}-${pos}`} style={{ '--i': index } as React.CSSProperties}><span>{pos}</span><strong>{byId[id]?.name}</strong></div>)}
+                  {Object.entries(current.assignments).sort(([left], [right]) => FIELD_ANIMATION_ORDER.indexOf(left as Position) - FIELD_ANIMATION_ORDER.indexOf(right as Position)).map(([pos, id], index) => <button type="button" className={`position pos-${pos.toLowerCase()} ${selectedFieldPlayer === id ? 'selected-player' : ''}`} disabled={!isAuthorized || isSavingManualField} aria-pressed={selectedFieldPlayer === id} onClick={() => void selectFieldPlayer(id)} key={`${inning}-${pos}`} style={{ '--i': index } as React.CSSProperties}><span>{pos}</span><strong>{byId[id]?.name}</strong></button>)}
                 </div>
               </div>
               <aside className="side-stack">
-                <div className="bench-card"><div className="card-label"><span>Bench</span><b>{current.bench.length} players</b></div>{current.bench.length ? current.bench.map(id => <div className="bench-player" key={id}><span className={`avatar prefix-${Math.min(badgeLabels[id]?.length || 1, 4)} ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[id]}</span></span><strong>{byId[id]?.name}</strong></div>) : <p className="empty">Everyone is fielding.</p>}</div>
+                <div className="bench-card"><div className="card-label"><span>Bench</span><b>{current.bench.length} players</b></div>{current.bench.length ? current.bench.map(id => <button type="button" className={`bench-player ${selectedFieldPlayer === id ? 'selected-player' : ''}`} disabled={!isAuthorized || isSavingManualField} aria-pressed={selectedFieldPlayer === id} onClick={() => void selectFieldPlayer(id)} key={id}><span className={`avatar prefix-${Math.min(badgeLabels[id]?.length || 1, 4)} ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[id]}</span></span><strong>{byId[id]?.name}</strong></button>) : <p className="empty">Everyone is fielding.</p>}</div>
                 <div className="change-card"><p className="eyebrow">At the change</p><h2>{inning === 0 ? 'Start here' : `For inning ${inning + 1}`}</h2>{inning === 0 ? <p className="muted">Take the field with the positions shown. The next card will list every swap.</p> : changes.length ? changes.map((c, i) => <div className={`change ${c.action.toLowerCase()}`} key={`${c.id}-${i}`}><b>{c.action}</b><span><strong>{byId[c.id]?.name}</strong>{c.pos && ` → ${c.pos}`}</span></div>) : <p className="muted">No bench changes this inning.</p>}</div>
               </aside>
             </div>
             <div className="next-bar"><button disabled={inning === 0} onClick={() => void selectInning(inning - 1)}>← Previous</button><span><i /> Gender rule met</span><button className="next" disabled={inning === plan.length - 1} onClick={() => void selectInning(inning + 1)}>Next inning →</button></div>
           </> : <section className="batting-card batting-tab-panel" role="tabpanel">
             <div className="card-label"><span>Batting order</span></div>
-            <ol>{battingOrder.map((id, index) => <li key={id} style={{ '--i': index } as React.CSSProperties}><span className={`lineup-number ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{index + 1}</span></span><strong>{byId[id]?.name}</strong></li>)}</ol>
+            <ol className={`editable ${isAuthorized ? '' : 'locked'}`}>{battingOrder.map((id, index) => <li className={draggingBatter === id ? 'dragging' : ''} data-batter-id={id} key={id} style={{ '--i': index } as React.CSSProperties}><button type="button" className="batting-grip" disabled={!isAuthorized} aria-label={isAuthorized ? `Move ${byId[id]?.name || 'player'} in the batting order` : 'Connect Google to edit the batting order'} onPointerDown={event => beginBattingDrag(event, id)} onPointerMove={moveBattingDrag} onPointerUp={event => void finishBattingDrag(event)} onPointerCancel={event => void finishBattingDrag(event, true)}><span aria-hidden="true">⠿</span></button><span className={`lineup-number ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{index + 1}</span></span><strong>{byId[id]?.name}</strong></li>)}</ol>
           </section>}
           <button className="regenerate-fielding-button" disabled={!isAuthorized || isRegeneratingFielding || isEndingGame} onClick={() => void regenerateRemainingFielding()}>{isRegeneratingFielding ? 'Regenerating fielding…' : `Regenerate fielding from inning ${inning + 1}`}</button>
           <button className="end-game-button" disabled={!isAuthorized || isEndingGame || isRegeneratingFielding} onClick={() => void endGame()}>{isEndingGame ? 'Ending game…' : 'End game and clear saved lineup'}</button>
@@ -729,7 +861,7 @@ function App() {
       {tab === 'roster' && <section className="panel-view">
         <div className="section-heading"><div><p className="eyebrow">Team sheet</p><h1>Who’s here?</h1><p>Tap a player to edit their positions. Switch them off if they’re late, hurt, or leaving early.</p></div></div>
         <div className={`roster-list ${isAuthorized ? '' : 'read-only'}`}>{players.map(player => <article className={!player.available ? 'unavailable' : ''} key={player.id} onClick={() => openPlayerEditor(player)}>
-          <button className="player-main" disabled={!isAuthorized} onClick={event => { event.stopPropagation(); openPlayerEditor(player); }}><span className={`avatar prefix-${Math.min(badgeLabels[player.id]?.length || 1, 4)} ${player.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[player.id]}</span></span><span><strong>{player.name}</strong><small>{genderLabel(player.gender)} · {player.positions.join(', ') || 'No positions yet'}{playerSchedule(player) && ` · ${playerSchedule(player)}`}</small></span></button>
+          <button className="player-main" disabled={!isAuthorized} onClick={event => { event.stopPropagation(); openPlayerEditor(player); }}><span className={`avatar prefix-${Math.min(badgeLabels[player.id]?.length || 1, 4)} ${player.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[player.id]}</span></span><span><strong>{player.name}</strong><small>{genderLabel(player.gender)} · Primary: {player.primaryPosition || 'Not set'} · {player.positions.join(', ') || 'No positions yet'}{playerSchedule(player) && ` · ${playerSchedule(player)}`}</small></span></button>
           <label className="switch" onClick={event => event.stopPropagation()}><input type="checkbox" checked={player.available} disabled={!isAuthorized || attendanceWrites.has(player.id)} onChange={() => void toggleAvailability(player)}/><span /></label>
         </article>)}</div>
         <button className="button primary add-player-button" disabled={!isAuthorized} onClick={() => openPlayerEditor({ id: uid(), name: '', gender: 'Woman', positions: [], battingStrength: 5, fieldingStrength: 5, available: true })}>+ Add player</button>
@@ -746,7 +878,12 @@ function App() {
       <p className="eyebrow">Player card</p><h2>{editing.name || 'New player'}</h2>
       <label>Name<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}/></label>
       <label>Gender<select value={editing.gender} onChange={e => setEditing({ ...editing, gender: e.target.value as Gender })}><option value="Woman">W</option><option value="Man">M</option><option value="Other">O</option></select></label>
-      <fieldset><legend>Positions they can play</legend><div className="position-pills">{ALL_POSITIONS.map(pos => <button type="button" className={editing.positions.includes(pos) ? 'selected' : ''} onClick={() => setEditing({ ...editing, positions: editing.positions.includes(pos) ? editing.positions.filter(p => p !== pos) : [...editing.positions, pos] })} key={pos}>{pos}</button>)}</div></fieldset>
+      <fieldset><legend>Positions they can play</legend><div className="position-pills">{ALL_POSITIONS.map(pos => <button type="button" className={editing.positions.includes(pos) ? 'selected' : ''} onClick={() => {
+        const positions = editing.positions.includes(pos) ? editing.positions.filter(p => p !== pos) : [...editing.positions, pos];
+        const primaryPosition = editing.primaryPosition && positions.includes(editing.primaryPosition) ? editing.primaryPosition : positions[0];
+        setEditing({ ...editing, positions, primaryPosition });
+      }} key={pos}>{pos}</button>)}</div></fieldset>
+      <label>Primary position<select value={editing.primaryPosition ?? ''} disabled={!editing.positions.length} onChange={e => setEditing({ ...editing, primaryPosition: e.target.value as RosterPosition })}><option value="" disabled>Select a primary position</option>{editing.positions.map(pos => <option value={pos} key={pos}>{pos}</option>)}</select></label>
       <div className="schedule-options">
         <div className="schedule-option">
           <div className="schedule-option-header"><span><strong>Coming late</strong><small>Set the first inning they can play.</small></span><label className="switch"><input type="checkbox" checked={Boolean(editing.lateArrivalInning)} onChange={e => setEditing({ ...editing, lateArrivalInning: e.target.checked ? Math.min(2, editing.earlyDepartureInning ?? 2) : undefined })}/><span /></label></div>
@@ -758,7 +895,7 @@ function App() {
         </div>
       </div>
       {editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning ? <p className="schedule-error">Arrival must be on or before the last eligible inning.</p> : null}
-      <div className="modal-actions"><button className="button danger" disabled={isSaving} onClick={() => { setPlayers(old => old.filter(p => p.id !== editing.id)); closePlayerEditor(); }}>Delete</button><button className="button primary" disabled={isSaving || !hasPlayerChanges || !editing.name || !editing.positions.length || Boolean(editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning)} onClick={() => void savePlayer(editing)}>{isSaving ? 'Saving…' : 'Save player'}</button></div>
+      <div className="modal-actions"><button className="button danger" disabled={isSaving} onClick={() => { setPlayers(old => old.filter(p => p.id !== editing.id)); closePlayerEditor(); }}>Delete</button><button className="button primary" disabled={isSaving || !hasPlayerChanges || !editing.name || !editing.positions.length || !editing.primaryPosition || Boolean(editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning)} onClick={() => void savePlayer(editing)}>{isSaving ? 'Saving…' : 'Save player'}</button></div>
     </section></div>}
   </div>;
 }
