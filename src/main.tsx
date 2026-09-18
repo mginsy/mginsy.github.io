@@ -873,9 +873,9 @@ function App() {
 
     {showAccountMenu ? <div className="account-backdrop" onClick={() => setShowAccountMenu(false)}><section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="account-sheet-title" onClick={event => event.stopPropagation()}><div className="sheet-handle"/><img src={googleIcon} alt=""/><p className="eyebrow">Google Sheets access</p><h2 id="account-sheet-title">Account connected</h2><p>Your account can update the roster and saved lineup. Logging out leaves the public lineup visible.</p><button className="button logout-button" onClick={logoutGoogle}>Log out</button><button className="button secondary" onClick={() => setShowAccountMenu(false)}>Cancel</button></section></div> : null}
 
-    {editing && <div className="modal-backdrop"><section className="modal player-modal">
-      <button className="icon-button close" aria-label="Close player editor" onClick={closePlayerEditor}>×</button>
-      <p className="eyebrow">Player card</p><h2>{editing.name || 'New player'}</h2>
+    {editing && <div className="modal-backdrop"><section className="modal player-modal" role="dialog" aria-modal="true" aria-labelledby="player-modal-title">
+      <header className="modal-header"><div><p className="eyebrow">Player card</p><h2 id="player-modal-title">{editing.name || 'New player'}</h2></div><button className="icon-button close" aria-label="Close player editor" onClick={closePlayerEditor}>×</button></header>
+      <div className="modal-scroll">
       <label>Name<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}/></label>
       <label>Gender<select value={editing.gender} onChange={e => setEditing({ ...editing, gender: e.target.value as Gender })}><option value="Woman">W</option><option value="Man">M</option><option value="Other">O</option></select></label>
       <fieldset><legend>Positions they can play</legend><div className="position-pills">{ALL_POSITIONS.map(pos => <button type="button" className={editing.positions.includes(pos) ? 'selected' : ''} onClick={() => {
@@ -896,6 +896,7 @@ function App() {
       </div>
       {editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning ? <p className="schedule-error">Arrival must be on or before the last eligible inning.</p> : null}
       <div className="modal-actions"><button className="button danger" disabled={isSaving} onClick={() => { setPlayers(old => old.filter(p => p.id !== editing.id)); closePlayerEditor(); }}>Delete</button><button className="button primary" disabled={isSaving || !hasPlayerChanges || !editing.name || !editing.positions.length || !editing.primaryPosition || Boolean(editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning)} onClick={() => void savePlayer(editing)}>{isSaving ? 'Saving…' : 'Save player'}</button></div>
+      </div>
     </section></div>}
   </div>;
 }
