@@ -27,6 +27,7 @@ const LOADING_MESSAGES = [
   'Hitting dingers',
   'Popping tha fuck off'
 ] as const;
+const FIELD_ANIMATION_ORDER: Position[] = ['C', '1B', '3B', 'P', '2B', 'SS', 'RF', 'RCF', 'CF', 'LCF', 'LF'];
 
 const PLAYER_SEEDS: Array<[string, Gender, RosterPosition[], number, number]> = [
   ['Maya', 'Woman', ['P', '2B'], 7, 8], ['Alex', 'Man', ['C', '1B'], 6, 6], ['Jamie', 'Woman', ['SS', '3B'], 8, 8],
@@ -75,6 +76,20 @@ function playerSchedule(player: Player): string {
   if (player.lateArrivalInning && player.lateArrivalInning > 1) details.push(`Arrives inning ${player.lateArrivalInning}`);
   if (player.earlyDepartureInning && player.earlyDepartureInning < GAME_RULES.innings) details.push(`Last inning ${player.earlyDepartureInning}`);
   return details.join(' · ');
+}
+
+function copyPlayer(player: Player): Player {
+  return { ...player, positions: [...player.positions] };
+}
+
+function playersMatch(left: Player, right: Player): boolean {
+  return left.id === right.id
+    && left.name === right.name
+    && left.gender === right.gender
+    && left.positions.join('|') === right.positions.join('|')
+    && left.available === right.available
+    && left.lateArrivalInning === right.lateArrivalInning
+    && left.earlyDepartureInning === right.earlyDepartureInning;
 }
 
 function buildBadgeLabels(players: Player[]): Record<string, string> {
@@ -422,6 +437,7 @@ function App() {
   const [isEndingGame, setIsEndingGame] = useState(false);
   const [attendanceWrites, setAttendanceWrites] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<Player | null>(null);
+  const [editingOriginal, setEditingOriginal] = useState<Player | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   useEffect(() => localStorage.setItem('dugout.players', JSON.stringify(players)), [players]);
@@ -442,6 +458,7 @@ function App() {
   const current = plan[inning];
   const byId = useMemo<Record<string, Player>>(() => Object.fromEntries(players.map(p => [p.id, p])), [players]);
   const badgeLabels = useMemo(() => buildBadgeLabels(players), [players]);
+  const hasPlayerChanges = Boolean(editing && editingOriginal && !playersMatch(editing, editingOriginal));
   const previous = plan[inning - 1];
   const changes: Change[] = current && previous ? [
     ...Object.values(previous.assignments).filter(id => !Object.values(current.assignments).includes(id)).map(id => ({ id, action: 'OUT' as const })),
@@ -557,12 +574,25 @@ function App() {
       setIsAuthorized(true);
       setPlayers(old => old.some(p => p.id === player.id) ? old.map(p => p.id === player.id ? player : p) : [...old, player]);
       setEditing(null);
+      setEditingOriginal(null);
       setNotice(`${player.name} saved to Google Sheets.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not save this player.');
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function openPlayerEditor(player: Player): void {
+    if (!isAuthorized) return;
+    const draft = copyPlayer(player);
+    setEditing(draft);
+    setEditingOriginal(copyPlayer(draft));
+  }
+
+  function closePlayerEditor(): void {
+    setEditing(null);
+    setEditingOriginal(null);
   }
 
   async function authorizeGoogle(): Promise<void> {
@@ -585,7 +615,7 @@ function App() {
     cachedSheetTitles = null;
     try { sessionStorage.removeItem(SESSION_TOKEN_KEY); } catch { /* The in-memory session is still cleared. */ }
     setIsAuthorized(false);
-    setEditing(null);
+    closePlayerEditor();
     setShowAccountMenu(false);
     if (token && window.google?.accounts?.oauth2?.revoke) window.google.accounts.oauth2.revoke(token, () => undefined);
   }
@@ -659,7 +689,7 @@ function App() {
 
       {tab === 'game' && <section className="game-view">
         <div className="game-heading">
-          <div><p className="eyebrow">Thursday night · Game card</p><h1>{plan.length ? <>Inning <em>{inning + 1}</em> of {plan.length}</> : 'Ready when you are.'}</h1></div>
+          <div><p className="eyebrow">Thursday night · Game card</p><h1>{plan.length ? <>Inning <em className="inning-number" key={inning}>{inning + 1}</em> of {plan.length}</> : 'Ready when you are.'}</h1></div>
         </div>
 
         {plan.length ? <>
@@ -678,18 +708,18 @@ function App() {
                   <i className="base base-first" aria-hidden="true" />
                   <i className="base base-second" aria-hidden="true" />
                   <i className="base base-third" aria-hidden="true" />
-                  {Object.entries(current.assignments).map(([pos, id], index) => <div className={`position pos-${pos.toLowerCase()}`} key={pos} style={{ '--i': index } as React.CSSProperties}><span>{pos}</span><strong>{byId[id]?.name}</strong></div>)}
+                  {Object.entries(current.assignments).sort(([left], [right]) => FIELD_ANIMATION_ORDER.indexOf(left as Position) - FIELD_ANIMATION_ORDER.indexOf(right as Position)).map(([pos, id], index) => <div className={`position pos-${pos.toLowerCase()}`} key={`${inning}-${pos}`} style={{ '--i': index } as React.CSSProperties}><span>{pos}</span><strong>{byId[id]?.name}</strong></div>)}
                 </div>
               </div>
               <aside className="side-stack">
-                <div className="bench-card"><div className="card-label"><span>Bench</span><b>{current.bench.length} players</b></div>{current.bench.length ? current.bench.map(id => <div className="bench-player" key={id}><span className={`avatar prefix-${Math.min(badgeLabels[id]?.length || 1, 4)} ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[id]}</span></span><strong>{byId[id]?.name}</strong><small>Back in rotation</small></div>) : <p className="empty">Everyone is fielding.</p>}</div>
+                <div className="bench-card"><div className="card-label"><span>Bench</span><b>{current.bench.length} players</b></div>{current.bench.length ? current.bench.map(id => <div className="bench-player" key={id}><span className={`avatar prefix-${Math.min(badgeLabels[id]?.length || 1, 4)} ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[id]}</span></span><strong>{byId[id]?.name}</strong></div>) : <p className="empty">Everyone is fielding.</p>}</div>
                 <div className="change-card"><p className="eyebrow">At the change</p><h2>{inning === 0 ? 'Start here' : `For inning ${inning + 1}`}</h2>{inning === 0 ? <p className="muted">Take the field with the positions shown. The next card will list every swap.</p> : changes.length ? changes.map((c, i) => <div className={`change ${c.action.toLowerCase()}`} key={`${c.id}-${i}`}><b>{c.action}</b><span><strong>{byId[c.id]?.name}</strong>{c.pos && ` → ${c.pos}`}</span></div>) : <p className="muted">No bench changes this inning.</p>}</div>
               </aside>
             </div>
             <div className="next-bar"><button disabled={inning === 0} onClick={() => void selectInning(inning - 1)}>← Previous</button><span><i /> Gender rule met</span><button className="next" disabled={inning === plan.length - 1} onClick={() => void selectInning(inning + 1)}>Next inning →</button></div>
           </> : <section className="batting-card batting-tab-panel" role="tabpanel">
             <div className="card-label"><span>Batting order</span></div>
-            <ol>{battingOrder.map((id, index) => <li key={id}><span className={`lineup-number ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{index + 1}</span></span><strong>{byId[id]?.name}</strong></li>)}</ol>
+            <ol>{battingOrder.map((id, index) => <li key={id} style={{ '--i': index } as React.CSSProperties}><span className={`lineup-number ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{index + 1}</span></span><strong>{byId[id]?.name}</strong></li>)}</ol>
           </section>}
           <button className="regenerate-fielding-button" disabled={!isAuthorized || isRegeneratingFielding || isEndingGame} onClick={() => void regenerateRemainingFielding()}>{isRegeneratingFielding ? 'Regenerating fielding…' : `Regenerate fielding from inning ${inning + 1}`}</button>
           <button className="end-game-button" disabled={!isAuthorized || isEndingGame || isRegeneratingFielding} onClick={() => void endGame()}>{isEndingGame ? 'Ending game…' : 'End game and clear saved lineup'}</button>
@@ -698,23 +728,23 @@ function App() {
 
       {tab === 'roster' && <section className="panel-view">
         <div className="section-heading"><div><p className="eyebrow">Team sheet</p><h1>Who’s here?</h1><p>Tap a player to edit their positions. Switch them off if they’re late, hurt, or leaving early.</p></div></div>
-        <div className={`roster-list ${isAuthorized ? '' : 'read-only'}`}>{players.map(player => <article className={!player.available ? 'unavailable' : ''} key={player.id}>
-          <button className="player-main" disabled={!isAuthorized} onClick={() => setEditing(player)}><span className={`avatar prefix-${Math.min(badgeLabels[player.id]?.length || 1, 4)} ${player.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[player.id]}</span></span><span><strong>{player.name}</strong><small>{genderLabel(player.gender)} · {player.positions.join(', ') || 'No positions yet'}{playerSchedule(player) && ` · ${playerSchedule(player)}`}</small></span></button>
-          <label className="switch"><input type="checkbox" checked={player.available} disabled={!isAuthorized || attendanceWrites.has(player.id)} onChange={() => void toggleAvailability(player)}/><span /></label>
+        <div className={`roster-list ${isAuthorized ? '' : 'read-only'}`}>{players.map(player => <article className={!player.available ? 'unavailable' : ''} key={player.id} onClick={() => openPlayerEditor(player)}>
+          <button className="player-main" disabled={!isAuthorized} onClick={event => { event.stopPropagation(); openPlayerEditor(player); }}><span className={`avatar prefix-${Math.min(badgeLabels[player.id]?.length || 1, 4)} ${player.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[player.id]}</span></span><span><strong>{player.name}</strong><small>{genderLabel(player.gender)} · {player.positions.join(', ') || 'No positions yet'}{playerSchedule(player) && ` · ${playerSchedule(player)}`}</small></span></button>
+          <label className="switch" onClick={event => event.stopPropagation()}><input type="checkbox" checked={player.available} disabled={!isAuthorized || attendanceWrites.has(player.id)} onChange={() => void toggleAvailability(player)}/><span /></label>
         </article>)}</div>
-        <button className="button primary add-player-button" disabled={!isAuthorized} onClick={() => setEditing({ id: uid(), name: '', gender: 'Woman', positions: [], battingStrength: 5, fieldingStrength: 5, available: true })}>+ Add player</button>
+        <button className="button primary add-player-button" disabled={!isAuthorized} onClick={() => openPlayerEditor({ id: uid(), name: '', gender: 'Woman', positions: [], battingStrength: 5, fieldingStrength: 5, available: true })}>+ Add player</button>
       </section>}
 
     </main>
 
-    <nav className="mobile-nav"><button className={tab === 'game' ? 'active' : ''} onClick={() => setTab('game')}><span>◇</span>Game</button><button className={tab === 'roster' ? 'active' : ''} onClick={() => setTab('roster')}><span>♟</span>Roster</button></nav>
+    <nav className="mobile-nav"><button className={tab === 'game' ? 'active' : ''} onClick={() => setTab('game')}><span>🥎</span>Game</button><button className={tab === 'roster' ? 'active' : ''} onClick={() => setTab('roster')}><span>♟️</span>Roster</button></nav>
 
     {showAccountMenu ? <div className="account-backdrop" onClick={() => setShowAccountMenu(false)}><section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="account-sheet-title" onClick={event => event.stopPropagation()}><div className="sheet-handle"/><img src={googleIcon} alt=""/><p className="eyebrow">Google Sheets access</p><h2 id="account-sheet-title">Account connected</h2><p>Your account can update the roster and saved lineup. Logging out leaves the public lineup visible.</p><button className="button logout-button" onClick={logoutGoogle}>Log out</button><button className="button secondary" onClick={() => setShowAccountMenu(false)}>Cancel</button></section></div> : null}
 
     {editing && <div className="modal-backdrop"><section className="modal player-modal">
-      <button className="icon-button close" aria-label="Close player editor" onClick={() => setEditing(null)}>×</button>
+      <button className="icon-button close" aria-label="Close player editor" onClick={closePlayerEditor}>×</button>
       <p className="eyebrow">Player card</p><h2>{editing.name || 'New player'}</h2>
-      <label>Name<input autoFocus value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}/></label>
+      <label>Name<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}/></label>
       <label>Gender<select value={editing.gender} onChange={e => setEditing({ ...editing, gender: e.target.value as Gender })}><option value="Woman">W</option><option value="Man">M</option><option value="Other">O</option></select></label>
       <fieldset><legend>Positions they can play</legend><div className="position-pills">{ALL_POSITIONS.map(pos => <button type="button" className={editing.positions.includes(pos) ? 'selected' : ''} onClick={() => setEditing({ ...editing, positions: editing.positions.includes(pos) ? editing.positions.filter(p => p !== pos) : [...editing.positions, pos] })} key={pos}>{pos}</button>)}</div></fieldset>
       <div className="schedule-options">
@@ -728,7 +758,7 @@ function App() {
         </div>
       </div>
       {editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning ? <p className="schedule-error">Arrival must be on or before the last eligible inning.</p> : null}
-      <div className="modal-actions"><button className="button danger" disabled={isSaving} onClick={() => { setPlayers(old => old.filter(p => p.id !== editing.id)); setEditing(null); }}>Delete</button><button className="button primary" disabled={isSaving || !editing.name || !editing.positions.length || Boolean(editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning)} onClick={() => void savePlayer(editing)}>{isSaving ? 'Saving…' : 'Save player'}</button></div>
+      <div className="modal-actions"><button className="button danger" disabled={isSaving} onClick={() => { setPlayers(old => old.filter(p => p.id !== editing.id)); closePlayerEditor(); }}>Delete</button><button className="button primary" disabled={isSaving || !hasPlayerChanges || !editing.name || !editing.positions.length || Boolean(editing.lateArrivalInning && editing.earlyDepartureInning && editing.lateArrivalInning > editing.earlyDepartureInning)} onClick={() => void savePlayer(editing)}>{isSaving ? 'Saving…' : 'Save player'}</button></div>
     </section></div>}
   </div>;
 }
