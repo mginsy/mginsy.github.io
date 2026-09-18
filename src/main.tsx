@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import googleIcon from './google.png';
+import loaderGif from './loader.gif';
 import './styles.css';
 
 const ALL_POSITIONS = ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'LCF', 'RCF', 'RF'] as const;
@@ -14,6 +16,17 @@ type Change = { id: string; action: 'IN' | 'OUT'; pos?: string };
 type StoredGame = { version: 1; plan: InningPlan[]; battingOrder: string[]; inning: number; updatedAt: string };
 
 const GAME_RULES = Object.freeze({ innings: 7, fielders: 10, minWomen: 4 });
+const LOADING_MESSAGES = [
+  'Loading lineup',
+  'We got the runsing',
+  'Shitting',
+  'Running around the bases',
+  'Swinging and possibly missing',
+  'Softballing',
+  'Max iz da goat',
+  'Hitting dingers',
+  'Popping tha fuck off'
+] as const;
 
 const PLAYER_SEEDS: Array<[string, Gender, RosterPosition[], number, number]> = [
   ['Maya', 'Woman', ['P', '2B'], 7, 8], ['Alex', 'Man', ['C', '1B'], 6, 6], ['Jamie', 'Woman', ['SS', '3B'], 8, 8],
@@ -25,6 +38,7 @@ const DEFAULT_PLAYERS: Player[] = PLAYER_SEEDS.map((p, i) => ({ id: `p${i}`, nam
 
 const DEFAULT_SHEET = 'https://docs.google.com/spreadsheets/d/1LLm4LPiC9C5_SInYt5pqw7YPfDD8cKLYDvMWpUyOZ4A/edit?gid=0#gid=0';
 const SHEET_CONFIG: SheetsConfig = Object.freeze({ spreadsheet: DEFAULT_SHEET, gid: '0' });
+const GAME_SHEET_GID = '1464823862';
 const GOOGLE_CLIENT_ID = '146985538868-deqlmntf9fpeaqfuk2fmdk3k32d2paq8.apps.googleusercontent.com';
 const POSITION_COLUMNS: Record<string, RosterPosition> = {
   pitcher: 'P', catcher: 'C', '1st base': '1B', '2nd base': '2B', '3rd base': '3B', shortstop: 'SS',
@@ -33,6 +47,7 @@ const POSITION_COLUMNS: Record<string, RosterPosition> = {
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 const genderLabel = (gender: Gender) => gender === 'Woman' ? 'W' : gender === 'Man' ? 'M' : 'O';
+const randomLoadingMessage = () => LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
 
 function spreadsheetIdFrom(value: string): string {
   const match = value.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -120,6 +135,32 @@ async function queryPublicSheet(spreadsheetId: string, gid: string): Promise<str
       resolve([headers, ...rows]);
     });
   });
+}
+
+async function queryPublicCell(spreadsheetId: string, gid: string, range: string): Promise<string> {
+  await loadGoogleCharts();
+  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/gviz/tq?headers=0&gid=${encodeURIComponent(gid)}&range=${encodeURIComponent(range)}`;
+  return new Promise((resolve, reject) => {
+    const query = new window.google.visualization.Query(url);
+    query.send((response: any) => {
+      if (response.isError()) return reject(new Error(response.getMessage() || 'Google could not read the public lineup.'));
+      const data = response.getDataTable();
+      resolve(data.getNumberOfRows() ? String(data.getValue(0, 0) ?? '') : '');
+    });
+  });
+}
+
+function parseStoredGame(raw: string): StoredGame | null {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as StoredGame;
+  if (parsed.version !== 1 || !Array.isArray(parsed.plan) || !Array.isArray(parsed.battingOrder)) throw new Error('The active-game worksheet contains invalid data.');
+  return parsed;
+}
+
+async function readPublicGameFromSheet(): Promise<StoredGame | null> {
+  const spreadsheetId = spreadsheetIdFrom(SHEET_CONFIG.spreadsheet);
+  const raw = await queryPublicCell(spreadsheetId, GAME_SHEET_GID, 'A1');
+  return parseStoredGame(raw);
 }
 
 function loadGoogleIdentity(): Promise<void> {
@@ -236,10 +277,7 @@ async function readGameFromSheet(): Promise<StoredGame | null> {
   if (!response.ok) throw new Error('Could not load the active game from Google Sheets.');
   const data = await response.json();
   const raw = data.values?.[0]?.[0];
-  if (!raw) return null;
-  const parsed = JSON.parse(raw) as StoredGame;
-  if (parsed.version !== 1 || !Array.isArray(parsed.plan) || !Array.isArray(parsed.battingOrder)) throw new Error('The active-game worksheet contains invalid data.');
-  return parsed;
+  return parseStoredGame(String(raw ?? ''));
 }
 
 async function clearGameSheet(): Promise<void> {
@@ -373,6 +411,8 @@ function App() {
   const [tab, setTab] = useState<AppTab>('game');
   const [gameView, setGameView] = useState<'field' | 'batting'>('field');
   const [notice, setNotice] = useState('');
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState(() => randomLoadingMessage());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAuthorizing, setIsAuthorizing] = useState(false);
@@ -382,6 +422,7 @@ function App() {
   const [isEndingGame, setIsEndingGame] = useState(false);
   const [attendanceWrites, setAttendanceWrites] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<Player | null>(null);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   useEffect(() => localStorage.setItem('dugout.players', JSON.stringify(players)), [players]);
   useEffect(() => {
@@ -394,8 +435,7 @@ function App() {
     if ('caches' in window) void caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dugout-')).map(key => caches.delete(key))));
   }, []);
   useEffect(() => {
-    void importSheet(SHEET_CONFIG, true);
-    if (sheetsToken && sheetsTokenExpiresAt > Date.now()) void restoreGame();
+    void refreshPublicData(true);
   }, []);
   useEffect(() => { void loadGoogleIdentity(); }, []);
 
@@ -444,17 +484,49 @@ function App() {
   async function restoreGame(): Promise<void> {
     try {
       const stored = await readGameFromSheet();
-      if (!stored) return;
-      setPlan(stored.plan);
-      setBattingOrder(stored.battingOrder);
-      setInning(Math.min(Math.max(stored.inning, 0), Math.max(stored.plan.length - 1, 0)));
+      applyStoredGame(stored);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not restore the active game.');
     }
   }
 
+  function applyStoredGame(stored: StoredGame | null): void {
+    if (!stored) {
+      setPlan([]);
+      setBattingOrder([]);
+      setInning(0);
+      return;
+    }
+    setPlan(stored.plan);
+    setBattingOrder(stored.battingOrder);
+    setInning(Math.min(Math.max(stored.inning, 0), Math.max(stored.plan.length - 1, 0)));
+  }
+
+  async function restorePublicGame(silent = false): Promise<void> {
+    try {
+      applyStoredGame(await readPublicGameFromSheet());
+    } catch (error) {
+      if (!silent) setNotice(error instanceof Error ? error.message : 'Could not load the public lineup.');
+    }
+  }
+
+  async function refreshPublicData(initial = false): Promise<void> {
+    if (initial) setIsInitialLoading(true);
+    else {
+      setLoadingMessage(randomLoadingMessage());
+      setIsRefreshing(true);
+    }
+    try {
+      await Promise.all([importSheet(SHEET_CONFIG, true), restorePublicGame(initial)]);
+    } finally {
+      if (initial) setIsInitialLoading(false);
+      else setIsRefreshing(false);
+    }
+  }
+
   async function selectInning(nextInning: number): Promise<void> {
     setInning(nextInning);
+    if (!isAuthorized) return;
     try {
       await persistGameToSheet(plan, battingOrder, nextInning);
     } catch (error) {
@@ -504,6 +576,18 @@ function App() {
     } finally {
       setIsAuthorizing(false);
     }
+  }
+
+  function logoutGoogle(): void {
+    const token = sheetsToken;
+    sheetsToken = '';
+    sheetsTokenExpiresAt = 0;
+    cachedSheetTitles = null;
+    try { sessionStorage.removeItem(SESSION_TOKEN_KEY); } catch { /* The in-memory session is still cleared. */ }
+    setIsAuthorized(false);
+    setEditing(null);
+    setShowAccountMenu(false);
+    if (token && window.google?.accounts?.oauth2?.revoke) window.google.accounts.oauth2.revoke(token, () => undefined);
   }
 
   async function toggleAvailability(player: Player): Promise<void> {
@@ -560,8 +644,10 @@ function App() {
   return <div className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => setTab('game')}><span className="ball" aria-hidden="true">🥎</span><span>WE GOT THE RUNS</span></button>
-      <div className="top-actions"><span className="saved"><i /> Saved on this iPhone</span><div className="cloud-actions"><button className={`profile-button ${isAuthorized ? 'connected' : ''}`} aria-label={isAuthorized ? 'Google account connected' : 'Connect Google account'} disabled={isAuthorizing} onClick={() => void authorizeGoogle()}><span className="profile-icon" aria-hidden="true"><i /><b /></span></button><button className="sync-button" aria-label={isRefreshing ? 'Refreshing roster data' : 'Refresh roster data'} disabled={isRefreshing} onClick={() => void importSheet(SHEET_CONFIG)}>↻ <span>{isRefreshing ? 'Refreshing…' : 'Refresh data'}</span></button></div></div>
+      <div className="top-actions"><span className="saved"><i /> Saved on this iPhone</span><div className="cloud-actions"><button className={`profile-button ${isAuthorized ? 'connected' : ''}`} aria-label={isAuthorized ? 'Open Google account menu' : 'Connect Google account'} disabled={isAuthorizing} onClick={() => isAuthorized ? setShowAccountMenu(true) : void authorizeGoogle()}><img src={googleIcon} alt=""/></button><button className="sync-button" aria-label={isRefreshing ? 'Refreshing roster and lineup data' : 'Refresh roster and lineup data'} disabled={isRefreshing || isInitialLoading} onClick={() => void refreshPublicData()}>↻ <span>{isRefreshing ? 'Refreshing…' : 'Refresh data'}</span></button></div></div>
     </header>
+
+    {(isInitialLoading || isRefreshing) ? <div className="data-loader" role="status" aria-live="polite"><img src={loaderGif} alt=""/><strong>{loadingMessage}</strong></div> : null}
 
     <main>
       <div className="desktop-tabs" role="tablist">
@@ -605,23 +691,25 @@ function App() {
             <div className="card-label"><span>Batting order</span></div>
             <ol>{battingOrder.map((id, index) => <li key={id}><span className={`lineup-number ${byId[id]?.gender.toLowerCase()}`}><span className="centered-glyph">{index + 1}</span></span><strong>{byId[id]?.name}</strong></li>)}</ol>
           </section>}
-          <button className="regenerate-fielding-button" disabled={isRegeneratingFielding || isEndingGame} onClick={() => void regenerateRemainingFielding()}>{isRegeneratingFielding ? 'Regenerating fielding…' : `Regenerate fielding from inning ${inning + 1}`}</button>
-          <button className="end-game-button" disabled={isEndingGame || isRegeneratingFielding} onClick={() => void endGame()}>{isEndingGame ? 'Ending game…' : 'End game and clear saved lineup'}</button>
+          <button className="regenerate-fielding-button" disabled={!isAuthorized || isRegeneratingFielding || isEndingGame} onClick={() => void regenerateRemainingFielding()}>{isRegeneratingFielding ? 'Regenerating fielding…' : `Regenerate fielding from inning ${inning + 1}`}</button>
+          <button className="end-game-button" disabled={!isAuthorized || isEndingGame || isRegeneratingFielding} onClick={() => void endGame()}>{isEndingGame ? 'Ending game…' : 'End game and clear saved lineup'}</button>
         </> : <div className="empty-game"><div className="empty-ball">🥎</div><h2>Your lineup card is blank.</h2><p>{isAuthorized ? 'Mark who’s here, then generate a fair seven-inning rotation.' : 'Connect your Google account above before generating a lineup.'}</p><button className="button primary" disabled={!isAuthorized || isGenerating} onClick={() => void regenerate()}>{isGenerating ? 'Generating…' : isAuthorized ? 'Generate 7-inning lineup' : 'Connect Google to generate'}</button></div>}
       </section>}
 
       {tab === 'roster' && <section className="panel-view">
         <div className="section-heading"><div><p className="eyebrow">Team sheet</p><h1>Who’s here?</h1><p>Tap a player to edit their positions. Switch them off if they’re late, hurt, or leaving early.</p></div></div>
-        <div className="roster-list">{players.map(player => <article className={!player.available ? 'unavailable' : ''} key={player.id}>
-          <button className="player-main" onClick={() => setEditing(player)}><span className={`avatar prefix-${Math.min(badgeLabels[player.id]?.length || 1, 4)} ${player.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[player.id]}</span></span><span><strong>{player.name}</strong><small>{genderLabel(player.gender)} · {player.positions.join(', ') || 'No positions yet'}{playerSchedule(player) && ` · ${playerSchedule(player)}`}</small></span></button>
-          <label className="switch"><input type="checkbox" checked={player.available} disabled={attendanceWrites.has(player.id)} onChange={() => void toggleAvailability(player)}/><span /></label>
+        <div className={`roster-list ${isAuthorized ? '' : 'read-only'}`}>{players.map(player => <article className={!player.available ? 'unavailable' : ''} key={player.id}>
+          <button className="player-main" disabled={!isAuthorized} onClick={() => setEditing(player)}><span className={`avatar prefix-${Math.min(badgeLabels[player.id]?.length || 1, 4)} ${player.gender.toLowerCase()}`}><span className="centered-glyph">{badgeLabels[player.id]}</span></span><span><strong>{player.name}</strong><small>{genderLabel(player.gender)} · {player.positions.join(', ') || 'No positions yet'}{playerSchedule(player) && ` · ${playerSchedule(player)}`}</small></span></button>
+          <label className="switch"><input type="checkbox" checked={player.available} disabled={!isAuthorized || attendanceWrites.has(player.id)} onChange={() => void toggleAvailability(player)}/><span /></label>
         </article>)}</div>
-        <button className="button primary add-player-button" onClick={() => setEditing({ id: uid(), name: '', gender: 'Woman', positions: [], battingStrength: 5, fieldingStrength: 5, available: true })}>+ Add player</button>
+        <button className="button primary add-player-button" disabled={!isAuthorized} onClick={() => setEditing({ id: uid(), name: '', gender: 'Woman', positions: [], battingStrength: 5, fieldingStrength: 5, available: true })}>+ Add player</button>
       </section>}
 
     </main>
 
     <nav className="mobile-nav"><button className={tab === 'game' ? 'active' : ''} onClick={() => setTab('game')}><span>◇</span>Game</button><button className={tab === 'roster' ? 'active' : ''} onClick={() => setTab('roster')}><span>♟</span>Roster</button></nav>
+
+    {showAccountMenu ? <div className="account-backdrop" onClick={() => setShowAccountMenu(false)}><section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="account-sheet-title" onClick={event => event.stopPropagation()}><div className="sheet-handle"/><img src={googleIcon} alt=""/><p className="eyebrow">Google Sheets access</p><h2 id="account-sheet-title">Account connected</h2><p>Your account can update the roster and saved lineup. Logging out leaves the public lineup visible.</p><button className="button logout-button" onClick={logoutGoogle}>Log out</button><button className="button secondary" onClick={() => setShowAccountMenu(false)}>Cancel</button></section></div> : null}
 
     {editing && <div className="modal-backdrop"><section className="modal player-modal">
       <button className="icon-button close" aria-label="Close player editor" onClick={() => setEditing(null)}>×</button>
