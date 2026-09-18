@@ -27,7 +27,7 @@ const LOADING_MESSAGES = [
   'Hitting dingers',
   'Popping tha fuck off'
 ] as const;
-const FIELD_ANIMATION_ORDER: Position[] = ['C', '1B', '3B', 'P', '2B', 'SS', 'RF', 'RCF', 'CF', 'LCF', 'LF'];
+const FIELD_ANIMATION_ORDER: Position[] = ['LF', 'LCF', 'CF', 'RCF', 'RF', 'SS', '2B', 'P', '3B', '1B', 'C'];
 
 const PLAYER_SEEDS: Array<[string, Gender, RosterPosition[], number, number]> = [
   ['Maya', 'Woman', ['P', '2B'], 7, 8], ['Alex', 'Man', ['C', '1B'], 6, 6], ['Jamie', 'Woman', ['SS', '3B'], 8, 8],
